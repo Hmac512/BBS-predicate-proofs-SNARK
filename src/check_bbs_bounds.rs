@@ -55,7 +55,7 @@ mod tests {
     use ark_bls12_381::Bls12_381;
     use ark_std::{
         collections::{BTreeMap, BTreeSet},
-        rand::{rngs::StdRng, RngCore, SeedableRng},
+        rand::{rngs::StdRng, SeedableRng},
         UniformRand,
     };
     use legogroth16::{
@@ -66,7 +66,6 @@ mod tests {
         EqualWitnesses, MetaStatement, MetaStatements, ProofSpec, Statement, Statements, Witness,
         WitnessRef, Witnesses,
     };
-    use std::time::Instant;
 
     #[test]
     fn bound_check_message() {
@@ -76,24 +75,25 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
         // Prover has the BBS+ signature
         let message_count = 10;
-        let (messages, sig_params, keypair, sig) = sig_setup(&mut rng, message_count);
-        sig.verify(&messages, &keypair.public_key, &sig_params)
+        let (messages, sig_params, bls_keypair, bbs_sig) = sig_setup(&mut rng, message_count);
+        bbs_sig
+            .verify(&messages, &bls_keypair.public_key, &sig_params)
             .unwrap();
 
         // Only 1 witness that is the message whose bounds need to proved is committed
         let commit_witness_count = 1;
 
-        let start = Instant::now();
-
-        let circuit = BoundCheckCircuit::<Fr> {
+        let arithmetic_circuit = BoundCheckCircuit::<Fr> {
             min: None,
             max: None,
             value: None,
         };
-        let params =
-            generate_random_parameters::<Bls12_381, _, _>(circuit, commit_witness_count, &mut rng)
-                .unwrap();
-        println!("Time taken for setup {:?}", start.elapsed());
+        let params = generate_random_parameters::<Bls12_381, _, _>(
+            arithmetic_circuit,
+            commit_witness_count,
+            &mut rng,
+        )
+        .unwrap();
 
         let pvk = prepare_verifying_key(&params.vk);
 
@@ -101,8 +101,8 @@ mod tests {
         let v = Fr::rand(&mut rng);
 
         // Message whose bounds need to be proved, i.e. `min < val < max` needs to be proved
-        let m_idx = 4;
-        let val = messages[m_idx].clone();
+        let msg_idx = 4;
+        let msg_val = messages[msg_idx].clone();
 
         let min = Fr::from(100u64);
         let max = Fr::from(107u64);
@@ -110,37 +110,32 @@ mod tests {
         let circuit = BoundCheckCircuit {
             min: Some(min),
             max: Some(max),
-            value: Some(val),
+            value: Some(msg_val),
         };
 
-        let start = Instant::now();
         // Prover creates LegoGroth16 proof
-        let snark_proof = create_random_proof(circuit, v, &params, &mut rng).unwrap();
-        let t1 = start.elapsed();
-        println!("Time taken to create LegoGroth16 proof {:?}", t1);
+        let zk_snark = create_random_proof(circuit, v, &params, &mut rng).unwrap();
 
         // This is not done by the verifier but the prover as safety check that the commitment is correct
-        verify_witness_commitment(&params.vk, &snark_proof, 2, &[val], &v).unwrap();
-        assert!(verify_witness_commitment(&params.vk, &snark_proof, 1, &[val], &v).is_err());
-        assert!(verify_witness_commitment(&params.vk, &snark_proof, 3, &[val], &v).is_err());
+        verify_witness_commitment(&params.vk, &zk_snark, 2, &[msg_val], &v).unwrap();
+        assert!(verify_witness_commitment(&params.vk, &zk_snark, 1, &[msg_val], &v).is_err());
+        assert!(verify_witness_commitment(&params.vk, &zk_snark, 3, &[msg_val], &v).is_err());
         assert!(
-            verify_witness_commitment(&params.vk, &snark_proof, 2, &[Fr::from(106u64)], &v)
-                .is_err()
+            verify_witness_commitment(&params.vk, &zk_snark, 2, &[Fr::from(106u64)], &v).is_err()
         );
 
         // Since both prover and verifier know the public inputs, they can independently get the commitment to the witnesses
-        let commitment_to_witness = snark_proof.d;
+        let commitment_to_witness = zk_snark.d;
 
         // The bases and commitment opening
         let bases = vec![params.vk.gamma_abc_g1[1 + 2], params.vk.eta_gamma_inv_g1];
-        let committed = vec![val, v];
+        let committed = vec![msg_val, v];
 
-        let start = Instant::now();
         // Prove the equality of message in the BBS+ signature and `commitment_to_witness`
         let mut statements = Statements::new();
         statements.add(Statement::PoKBBSSignatureG1(PoKSignatureBBSG1Stmt {
             params: sig_params.clone(),
-            public_key: keypair.public_key.clone(),
+            public_key: bls_keypair.public_key.clone(),
             revealed_messages: BTreeMap::new(),
         }));
         statements.add(Statement::PedersenCommitment(PedersenCommitmentStmt {
@@ -150,7 +145,7 @@ mod tests {
 
         let mut meta_statements = MetaStatements::new();
         meta_statements.add(MetaStatement::WitnessEquality(EqualWitnesses(
-            vec![(0, m_idx), (1, 0)] // 0th statement's `m_idx`th witness is equal to 1st statement's 0th witness
+            vec![(0, msg_idx), (1, 0)] // 0th statement's `m_idx`th witness is equal to 1st statement's 0th witness
                 .into_iter()
                 .collect::<BTreeSet<WitnessRef>>(),
         )));
@@ -163,7 +158,7 @@ mod tests {
 
         let mut witnesses = Witnesses::new();
         witnesses.add(PoKSignatureBBSG1Wit::new_as_witness(
-            sig.clone(),
+            bbs_sig.clone(),
             messages
                 .clone()
                 .into_iter()
@@ -174,20 +169,10 @@ mod tests {
         witnesses.add(Witness::PedersenCommitment(committed));
 
         let proof = ProofG1::new(&mut rng, proof_spec.clone(), witnesses.clone(), None).unwrap();
-        let t2 = start.elapsed();
-        println!("Time taken to create composite proof {:?}", t2);
-        println!("Total time taken to create proof {:?}", t1 + t2);
 
-        // Verifies verifies LegoGroth16 proof
-        let start = Instant::now();
-        verify_proof(&pvk, &snark_proof, &[min, max]).unwrap();
-        let t1 = start.elapsed();
-        println!("Time taken to verify LegoGroth16 proof {:?}", t1);
+        // verifies Groth16 proof
+        verify_proof(&pvk, &zk_snark, &[min, max]).unwrap();
 
-        let start = Instant::now();
         proof.verify(proof_spec, None).unwrap();
-        let t2 = start.elapsed();
-        println!("Time taken to verify composite proof {:?}", t2);
-        println!("Total time taken to verify proof {:?}", t1 + t2);
     }
 }
