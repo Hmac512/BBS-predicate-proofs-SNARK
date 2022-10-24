@@ -107,14 +107,14 @@ mod tests {
         let min = Fr::from(100u64);
         let max = Fr::from(107u64);
 
-        let circuit = BoundCheckCircuit {
+        let arithmetic_circuit = BoundCheckCircuit {
             min: Some(min),
             max: Some(max),
             value: Some(msg_val),
         };
 
         // Prover creates LegoGroth16 proof
-        let zk_snark = create_random_proof(circuit, v, &params, &mut rng).unwrap();
+        let zk_snark = create_random_proof(arithmetic_circuit, v, &params, &mut rng).unwrap();
 
         // This is not done by the verifier but the prover as safety check that the commitment is correct
         verify_witness_commitment(&params.vk, &zk_snark, 2, &[msg_val], &v).unwrap();
