@@ -124,12 +124,12 @@ mod tests {
             verify_witness_commitment(&params.vk, &zk_snark, 2, &[Fr::from(106u64)], &v).is_err()
         );
 
-        // Since both prover and verifier know the public inputs, they can independently get the commitment to the witnesses
-        let commitment_to_witness = zk_snark.d;
-
         // The bases and commitment opening
         let bases = vec![params.vk.gamma_abc_g1[1 + 2], params.vk.eta_gamma_inv_g1];
         let committed = vec![msg_val, v];
+
+        // Since both prover and verifier know the public inputs, they can independently get the commitment to the witnesses
+        let commitment_to_witness = zk_snark.d;
 
         // Prove the equality of message in the BBS+ signature and `commitment_to_witness`
         let mut statements = Statements::new();
