@@ -140,7 +140,7 @@ mod tests {
     use ark_bls12_381::Bls12_381;
     use ark_std::{
         collections::{BTreeMap, BTreeSet},
-        rand::{rngs::StdRng, RngCore, SeedableRng},
+        rand::{rngs::StdRng, SeedableRng},
         UniformRand,
     };
     use legogroth16::{
