@@ -1,10 +1,12 @@
-pub mod check_bbs_bounds;
+pub mod sum;
+
+use ark_std::vec::Vec;
 
 #[cfg(test)]
 pub mod tests {
-
-    use ark_bls12_381::{Bls12_381, G1Affine};
-    use ark_ec::PairingEngine;
+    use super::*;
+    use ark_bls12_381::{Bls12_381, G1Affine, G1Projective};
+    use ark_ec::{PairingEngine, ProjectiveCurve};
     use ark_std::rand::RngCore;
     use bbs_plus::prelude::{KeypairG2, SignatureG1, SignatureParamsG1};
     use blake2::Blake2b;
@@ -27,9 +29,10 @@ pub mod tests {
         KeypairG2<Bls12_381>,
         SignatureG1<Bls12_381>,
     ) {
+        // Generate messages as 101, 102, ..., 100+ message_count
         let messages: Vec<Fr> = (1..=message_count)
             .into_iter()
-            .map(|i| Fr::from(100 + i as u64))
+            .map(|i| Fr::from(40 + i as u64))
             .collect();
         let params = SignatureParamsG1::<Bls12_381>::generate_using_rng(rng, message_count);
         let keypair = KeypairG2::<Bls12_381>::generate_using_rng(rng, &params);
